@@ -4,6 +4,7 @@ import prisma from "@/lib/prisma";
 import { BackLink } from "@/components/ui";
 import { InvoicePrintButton } from "@/components/invoice-print-button";
 import InvoiceSheet from "@/components/invoice-sheet";
+import { getSettings } from "@/lib/settings";
 
 export const dynamic = "force-dynamic";
 
@@ -17,13 +18,16 @@ export default async function PortalInvoicePage({
   const customerId = session?.user?.customerId;
   if (!customerId) redirect("/login");
 
-  const sale = await prisma.sale.findUnique({
-    where: { id },
-    include: {
-      customer: true,
-      items: { include: { item: { select: { name: true, baseUnit: true } } } },
-    },
-  });
+  const [sale, settings] = await Promise.all([
+    prisma.sale.findUnique({
+      where: { id },
+      include: {
+        customer: true,
+        items: { include: { item: { select: { name: true, baseUnit: true } } } },
+      },
+    }),
+    getSettings(),
+  ]);
   // Not found OR not this customer's invoice — never leak another customer's bill.
   if (!sale || sale.customerId !== customerId) notFound();
 
@@ -33,7 +37,7 @@ export default async function PortalInvoicePage({
         <BackLink href="/portal/invoices">Back to invoices</BackLink>
         <InvoicePrintButton />
       </div>
-      <InvoiceSheet sale={sale} />
+      <InvoiceSheet sale={sale} thankYouMessage={settings.thankYouMessage} />
     </div>
   );
 }

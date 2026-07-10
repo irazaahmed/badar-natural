@@ -23,6 +23,8 @@ export default async function EditItemPage({
     wholesalePricePerKg: item.wholesalePricePerKg.toString(),
     bagWeightKg: item.bagWeightKg ? item.bagWeightKg.toString() : "",
     lowStockThresholdKg: (Number(item.lowStockThreshold) / 1000).toString(),
+    barcode: item.barcode ?? "",
+    defaultPackKg: item.defaultPackWeightGrams ? (item.defaultPackWeightGrams / 1000).toString() : "",
   };
 
   return (

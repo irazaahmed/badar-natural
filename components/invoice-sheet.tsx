@@ -3,7 +3,7 @@ import { Card, Badge } from "@/components/ui";
 import { Logo } from "@/components/logo";
 import { formatMoney, formatDate } from "@/lib/format";
 import { formatKg } from "@/lib/units";
-import { BUSINESS } from "@/lib/business";
+import { BUSINESS, INVOICE_NASTALIQ_TAGLINE, DEFAULT_THANK_YOU } from "@/lib/business";
 
 export type InvoiceSale = {
   invoiceNumber: string;
@@ -12,6 +12,7 @@ export type InvoiceSale = {
   paymentType: "CASH" | "CREDIT";
   status: "UNPAID" | "PARTIAL" | "PAID";
   dueDate: Date | null;
+  cancelledAt?: Date | null;
   totalAmount: Prisma.Decimal;
   paidAmount: Prisma.Decimal;
   customer: { name: string; phone: string | null } | null;
@@ -29,14 +30,28 @@ export type InvoiceSale = {
  * The branded, bilingual (English + Urdu) invoice sheet. Read-only and print
  * ready — shared by the admin invoice page and the customer portal so both
  * render an identical bill. Any payment controls live OUTSIDE this component.
+ *
+ * Line items are boxed (§8.2) and a mandatory Urdu Nastaleeq tagline (§8.1) is
+ * printed below the thank-you line. `thankYouMessage` is owner-configurable
+ * (§7.1) and falls back to the constant when not supplied.
  */
-export default function InvoiceSheet({ sale }: { sale: InvoiceSale }) {
+export default function InvoiceSheet({
+  sale,
+  thankYouMessage = DEFAULT_THANK_YOU,
+}: {
+  sale: InvoiceSale;
+  thankYouMessage?: string;
+}) {
   const remaining = sale.totalAmount.minus(sale.paidAmount);
   const isCredit = sale.paymentType === "CREDIT";
   const overdue = sale.status !== "PAID" && !!sale.dueDate && sale.dueDate < new Date();
+  const cancelled = !!sale.cancelledAt;
+
+  // Boxed cell border in the brand's dark-brown tone (§8.2), not pure black.
+  const cell = "border border-navy-800/60 px-3 py-2 dark:border-brand-200/25";
 
   return (
-    <Card className="overflow-hidden p-0 print:border-0 print:shadow-none">
+    <Card className="invoice-sheet overflow-hidden p-0 print:border-0 print:shadow-none">
       {/* Header — espresso band with logo + bilingual tagline */}
       <div className="bg-navy-900 px-8 py-6 text-white print:bg-navy-900">
         <div className="flex flex-wrap items-start justify-between gap-4">
@@ -59,6 +74,11 @@ export default function InvoiceSheet({ sale }: { sale: InvoiceSale }) {
       </div>
 
       <div className="px-8 py-6 text-slate-800 dark:text-slate-200">
+        {cancelled && (
+          <div className="mb-4 rounded-lg border border-red-300 bg-red-50 px-4 py-2 text-center text-sm font-semibold text-red-700 dark:border-red-500/40 dark:bg-red-500/10 dark:text-red-400">
+            CANCELLED — منسوخ {sale.cancelledAt ? `(${formatDate(sale.cancelledAt)})` : ""}
+          </div>
+        )}
         {/* Meta */}
         <div className="flex flex-wrap items-start justify-between gap-4 border-b border-slate-200 pb-4 dark:border-slate-700">
           <div>
@@ -74,26 +94,26 @@ export default function InvoiceSheet({ sale }: { sale: InvoiceSale }) {
           </div>
         </div>
 
-        {/* Lines */}
-        <table className="mt-4 w-full text-sm">
+        {/* Lines — boxed cells (§8.2) */}
+        <table className="mt-4 w-full border-collapse text-sm">
           <thead>
-            <tr className="text-left text-xs uppercase tracking-wide text-slate-500">
-              <th className="py-2">Item / تفصیل</th>
-              <th className="py-2 text-right">Qty</th>
-              <th className="py-2 text-right">Rate/kg</th>
-              <th className="py-2 text-right">Amount</th>
+            <tr className="bg-slate-100/70 text-left text-xs uppercase tracking-wide text-slate-600 dark:bg-slate-800/40 dark:text-slate-300">
+              <th className={cell}>Item / تفصیل</th>
+              <th className={`${cell} text-right`}>Qty</th>
+              <th className={`${cell} text-right`}>Rate/kg</th>
+              <th className={`${cell} text-right`}>Amount</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+          <tbody>
             {sale.items.map((li) => (
               <tr key={li.id}>
-                <td className="py-2.5 font-medium text-slate-900 dark:text-slate-100">{li.item.name}</td>
-                <td className="py-2.5 text-right tabular-nums">
+                <td className={`${cell} font-medium text-slate-900 dark:text-slate-100`}>{li.item.name}</td>
+                <td className={`${cell} text-right tabular-nums`}>
                   {li.quantityLabel}
                   <span className="block text-xs text-slate-400">{formatKg(Number(li.quantityGrams) / 1000, li.item.baseUnit === "ML" ? "ML" : "GRAM")}</span>
                 </td>
-                <td className="py-2.5 text-right tabular-nums">{formatMoney(li.ratePerKg)}</td>
-                <td className="py-2.5 text-right tabular-nums">{formatMoney(li.lineTotal)}</td>
+                <td className={`${cell} text-right tabular-nums`}>{formatMoney(li.ratePerKg)}</td>
+                <td className={`${cell} text-right tabular-nums`}>{formatMoney(li.lineTotal)}</td>
               </tr>
             ))}
           </tbody>
@@ -122,7 +142,9 @@ export default function InvoiceSheet({ sale }: { sale: InvoiceSale }) {
         {/* Payment status */}
         <div className="mt-5 flex items-center gap-2 border-t border-slate-200 pt-4 text-sm dark:border-slate-700">
           <span className="text-slate-500">Payment:</span>
-          {!isCredit ? (
+          {cancelled ? (
+            <Badge tone="red">Cancelled</Badge>
+          ) : !isCredit ? (
             <Badge tone="emerald">Cash — paid in full</Badge>
           ) : sale.status === "PAID" ? (
             <Badge tone="emerald">Credit — cleared</Badge>
@@ -133,9 +155,23 @@ export default function InvoiceSheet({ sale }: { sale: InvoiceSale }) {
           )}
         </div>
 
-        <p className="mt-6 text-center text-xs text-slate-400">
-          Shukriya! · شکریہ — {BUSINESS.name}
+        {/* Thank-you (configurable, §7.1) */}
+        <p className="mt-6 text-center text-xs text-slate-500 dark:text-slate-400">{thankYouMessage}</p>
+        <p className="mt-0.5 text-center text-xs text-slate-400">شکریہ · Shukriya — {BUSINESS.name}</p>
+
+        {/* Mandatory Urdu Nastaleeq tagline (§8.1) — RTL, secondary size. */}
+        <p
+          dir="rtl"
+          lang="ur"
+          className="font-nastaliq mx-auto mt-4 max-w-xl text-center text-[13px] leading-[2.4] text-navy-900 dark:text-brand-100"
+        >
+          {INVOICE_NASTALIQ_TAGLINE}
         </p>
+
+        {/* Footer / branding strip */}
+        <div className="mt-4 border-t border-slate-200 pt-3 text-center text-[11px] text-slate-400 dark:border-slate-700">
+          {BUSINESS.name} · {BUSINESS.owner} · {BUSINESS.phone} · {BUSINESS.website.replace("https://", "").replace(/\/$/, "")}
+        </div>
       </div>
     </Card>
   );

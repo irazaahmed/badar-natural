@@ -5,14 +5,18 @@ import {
   Badge,
   BackLink,
   Card,
+  Input,
+  Label,
   PageHeader,
   Table,
   Td,
   Th,
   btnRowCls,
+  inputCls,
 } from "@/components/ui";
 import RecordPaymentForm from "@/components/record-payment-form";
 import { recordSalePayment } from "@/lib/actions/sales";
+import { setCustomerItemRate, removeCustomerItemRate } from "@/lib/actions/customer-rates";
 import { formatMoney, formatDate, formatDateTime } from "@/lib/format";
 import { waLink, receivableReminder } from "@/lib/whatsapp";
 
@@ -29,12 +33,19 @@ export default async function CustomerLedgerPage({
     include: {
       ledgerEntries: { orderBy: { createdAt: "desc" }, take: 100 },
       sales: {
-        where: { paymentType: "CREDIT", status: { not: "PAID" } },
+        where: { paymentType: "CREDIT", status: { not: "PAID" }, cancelledAt: null },
         orderBy: { createdAt: "asc" },
       },
+      itemRates: { include: { item: { select: { name: true } } }, orderBy: { item: { name: "asc" } } },
     },
   });
   if (!customer) notFound();
+
+  const items = await prisma.item.findMany({
+    where: { isActive: true },
+    orderBy: [{ category: "asc" }, { name: "asc" }],
+    select: { id: true, name: true, category: true },
+  });
 
   const now = new Date();
   const receivable = Number(customer.totalReceivable);
@@ -60,13 +71,19 @@ export default async function CustomerLedgerPage({
           <p className={`mt-1 text-2xl font-bold tabular-nums ${receivable > 0 ? "text-amber-600 dark:text-amber-400" : "text-emerald-600 dark:text-emerald-400"}`}>
             {formatMoney(receivable)}
           </p>
-          <p className="mt-2">
+          <div className="mt-2 flex flex-wrap gap-2">
             {customer.passwordHash ? (
               <Badge tone="emerald">Portal login enabled</Badge>
             ) : (
               <Badge tone="slate">No portal login</Badge>
             )}
-          </p>
+            {customer.discountPercent && <Badge tone="brand">{customer.discountPercent.toString()}% standing discount</Badge>}
+            {customer.creditLimit ? (
+              <Badge tone="slate">Credit limit {formatMoney(customer.creditLimit)}</Badge>
+            ) : (
+              <Badge tone="slate">Unlimited credit</Badge>
+            )}
+          </div>
         </div>
         {receivable > 0 && customer.phone && (
           <a
@@ -79,6 +96,50 @@ export default async function CustomerLedgerPage({
           </a>
         )}
       </Card>
+
+      {/* Per-customer item rates (§7.2) */}
+      <div>
+        <h2 className="mb-3 text-lg font-semibold text-slate-900 dark:text-slate-100">Special rates</h2>
+        <Card className="p-5">
+          <p className="mb-4 text-sm text-slate-500 dark:text-slate-400">
+            Negotiated per-item rates for this customer. Used first on wholesale sale lines, before the
+            standing discount and the item&apos;s default wholesale price.
+          </p>
+
+          {customer.itemRates.length > 0 && (
+            <ul className="mb-4 divide-y divide-slate-100 dark:divide-slate-800">
+              {customer.itemRates.map((r) => (
+                <li key={r.id} className="flex items-center justify-between gap-3 py-2 text-sm">
+                  <span className="font-medium text-slate-900 dark:text-slate-100">{r.item.name}</span>
+                  <div className="flex items-center gap-3">
+                    <span className="tabular-nums text-slate-700 dark:text-slate-300">{formatMoney(r.ratePerKg)}/kg</span>
+                    <form action={removeCustomerItemRate.bind(null, id, r.itemId)}>
+                      <button type="submit" className="text-xs font-medium text-red-500 hover:text-red-600">Remove</button>
+                    </form>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+
+          <form action={setCustomerItemRate.bind(null, id)} className="flex flex-wrap items-end gap-3">
+            <div className="min-w-[12rem] flex-1">
+              <Label htmlFor="rateItem">Item</Label>
+              <select id="rateItem" name="itemId" required className={inputCls}>
+                <option value="">— Select item —</option>
+                {items.map((it) => (
+                  <option key={it.id} value={it.id}>{it.name} · {it.category}</option>
+                ))}
+              </select>
+            </div>
+            <div className="w-32">
+              <Label htmlFor="rateValue">Rate / kg</Label>
+              <Input id="rateValue" name="ratePerKg" type="number" min="0.01" step="0.01" required />
+            </div>
+            <button type="submit" className={btnRowCls}>Save rate</button>
+          </form>
+        </Card>
+      </div>
 
       {/* Unpaid credit sales with per-sale payment */}
       {customer.sales.length > 0 && (
@@ -141,6 +202,8 @@ export default async function CustomerLedgerPage({
                   <Td>
                     {e.type === "SALE" ? (
                       <Badge tone="amber">Sale</Badge>
+                    ) : e.type === "REFUND" ? (
+                      <Badge tone="slate">Refund</Badge>
                     ) : (
                       <Badge tone="emerald">Payment</Badge>
                     )}

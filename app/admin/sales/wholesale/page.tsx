@@ -7,8 +7,17 @@ export const dynamic = "force-dynamic";
 export default async function WholesaleSalePage() {
   const [items, customers] = await Promise.all([
     prisma.item.findMany({ where: { isActive: true }, orderBy: [{ category: "asc" }, { name: "asc" }] }),
-    prisma.customer.findMany({ orderBy: { name: "asc" } }),
+    prisma.customer.findMany({ orderBy: { name: "asc" }, include: { itemRates: true } }),
   ]);
+
+  // Per-customer pricing map (§7.2) for the form to apply live.
+  const customerTerms: Record<string, { discountPercent: number | null; rates: Record<string, string> }> = {};
+  for (const c of customers) {
+    customerTerms[c.id] = {
+      discountPercent: c.discountPercent ? Number(c.discountPercent) : null,
+      rates: Object.fromEntries(c.itemRates.map((r) => [r.itemId, r.ratePerKg.toString()])),
+    };
+  }
 
   if (items.length === 0) {
     return (
@@ -33,8 +42,10 @@ export default async function WholesaleSalePage() {
             currentStock: Number(i.currentStock),
             wholesalePricePerKg: i.wholesalePricePerKg.toString(),
             bagWeightKg: i.bagWeightKg ? i.bagWeightKg.toString() : null,
+            barcode: i.barcode,
           }))}
           customers={customers.map((c) => ({ id: c.id, name: c.name, phone: c.phone ?? "" }))}
+          customerTerms={customerTerms}
         />
       </Card>
     </div>

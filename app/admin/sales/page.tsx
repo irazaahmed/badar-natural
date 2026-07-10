@@ -13,7 +13,8 @@ import { formatMoney, formatDate } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
 
-function statusBadge(status: string, overdue: boolean, isCredit: boolean) {
+function statusBadge(status: string, overdue: boolean, isCredit: boolean, cancelled: boolean) {
+  if (cancelled) return <Badge tone="slate">Cancelled</Badge>;
   if (!isCredit || status === "PAID") return <Badge tone="emerald">Paid</Badge>;
   if (overdue) return <Badge tone="red">Overdue</Badge>;
   if (status === "PARTIAL") return <Badge tone="amber">Partial</Badge>;
@@ -72,8 +73,8 @@ export default async function SalesPage() {
                   <Td className="whitespace-nowrap">{formatDate(s.createdAt)}</Td>
                   <Td>{s.channel === "WHOLESALE" ? "Wholesale" : "Retail"}</Td>
                   <Td>{s.customer?.name ?? "Walk-in"}</Td>
-                  <Td className="text-right tabular-nums">{formatMoney(s.totalAmount)}</Td>
-                  <Td>{statusBadge(s.status, overdue, s.paymentType === "CREDIT")}</Td>
+                  <Td className={`text-right tabular-nums ${s.cancelledAt ? "text-slate-400 line-through" : ""}`}>{formatMoney(s.totalAmount)}</Td>
+                  <Td>{statusBadge(s.status, overdue, s.paymentType === "CREDIT", !!s.cancelledAt)}</Td>
                 </tr>
               );
             })}

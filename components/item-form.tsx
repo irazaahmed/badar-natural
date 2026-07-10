@@ -15,6 +15,8 @@ export type ItemFormValues = {
   wholesalePricePerKg: string;
   bagWeightKg: string;
   lowStockThresholdKg: string;
+  barcode?: string;
+  defaultPackKg?: string;
 };
 
 export default function ItemForm({ initial }: { initial?: ItemFormValues }) {
@@ -74,6 +76,18 @@ export default function ItemForm({ initial }: { initial?: ItemFormValues }) {
         <div>
           <Label htmlFor="bagWeightKg">Bag weight (kg, optional)</Label>
           <Input id="bagWeightKg" name="bagWeightKg" type="number" min="0" step="0.1" defaultValue={initial?.bagWeightKg} placeholder="e.g. 20 or 40" />
+        </div>
+
+        <div>
+          <Label htmlFor="barcode">Barcode (optional)</Label>
+          <Input id="barcode" name="barcode" defaultValue={initial?.barcode} placeholder="Scan or type the barcode" autoComplete="off" />
+          <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Scan with a USB/Bluetooth scanner to search &amp; add faster.</p>
+        </div>
+
+        <div>
+          <Label htmlFor="defaultPackKg">Pack size (kg / L, optional)</Label>
+          <Input id="defaultPackKg" name="defaultPackKg" type="number" min="0" step="0.001" defaultValue={initial?.defaultPackKg} placeholder="e.g. 1 for a 1 kg jar" />
+          <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Fixed-size packs auto-fill this quantity on scan. Leave blank for loose bulk items.</p>
         </div>
 
         <div>

@@ -16,6 +16,8 @@ export default function CustomerForm({
     address?: string;
     type?: string;
     hasLogin?: boolean;
+    discountPercent?: string;
+    creditLimit?: string;
   };
   submitLabel?: string;
 }) {
@@ -48,6 +50,20 @@ export default function CustomerForm({
       <p className="text-xs text-slate-500 dark:text-slate-400">
         Phone is unique when given — re-adding the same number updates the existing customer.
       </p>
+
+      {/* Wholesale terms (§7.2) */}
+      <div className="grid gap-4 sm:grid-cols-2">
+        <div>
+          <Label htmlFor="discountPercent">Standing discount (%, optional)</Label>
+          <Input id="discountPercent" name="discountPercent" type="number" min="0" max="100" step="0.1" defaultValue={defaults.discountPercent} placeholder="e.g. 5" />
+          <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Applied to wholesale lines when no per-item rate is set.</p>
+        </div>
+        <div>
+          <Label htmlFor="creditLimit">Credit limit (Rs., optional)</Label>
+          <Input id="creditLimit" name="creditLimit" type="number" min="0" step="1" defaultValue={defaults.creditLimit} placeholder="blank = unlimited" />
+          <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Credit sales past this warn the owner (override allowed).</p>
+        </div>
+      </div>
 
       {/* Portal login (optional, owner-provisioned) */}
       <div className="space-y-3 rounded-xl border border-dashed border-slate-300 p-4 dark:border-slate-700">

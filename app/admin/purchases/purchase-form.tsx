@@ -6,6 +6,7 @@ import { createPurchase } from "@/lib/actions/purchases";
 import type { FormState } from "@/lib/actions/utils";
 import { FormError, Input, Label, SubmitButton, inputCls, btnRowCls } from "@/components/ui";
 import SupplierPicker, { type PickerSupplier } from "@/components/supplier-picker";
+import { BarcodeInput } from "@/components/barcode-input";
 import { formatMoney } from "@/lib/format";
 
 export type PurchaseItemOption = {
@@ -14,6 +15,7 @@ export type PurchaseItemOption = {
   category: string;
   bagWeightKg: string | null;
   lastPurchasePricePerKg: string | null;
+  barcode: string | null;
 };
 
 type Line = {
@@ -37,9 +39,25 @@ export default function PurchaseForm({
   const [lines, setLines] = useState<Line[]>([{ ...emptyLine }]);
   const [paymentType, setPaymentType] = useState<"CASH" | "CREDIT">("CASH");
   const [paidAmount, setPaidAmount] = useState("0");
+  const [scanMsg, setScanMsg] = useState<React.ReactNode>(null);
+
+  const byBarcode = useMemo(() => {
+    const m = new Map<string, PurchaseItemOption>();
+    for (const it of items) if (it.barcode) m.set(it.barcode, it);
+    return m;
+  }, [items]);
 
   function updateLine(i: number, patch: Partial<Line>) {
     setLines((prev) => prev.map((l, idx) => (idx === i ? { ...l, ...patch } : l)));
+  }
+  function lineFromItem(it: PurchaseItemOption): Line {
+    return {
+      itemId: it.id,
+      mode: it.bagWeightKg ? "bag" : "kg",
+      quantity: "",
+      bagWeightKg: it.bagWeightKg ?? "",
+      ratePerKg: it.lastPurchasePricePerKg ?? "",
+    };
   }
   function onPickItem(i: number, itemId: string) {
     const it = items.find((x) => x.id === itemId);
@@ -49,6 +67,28 @@ export default function PurchaseForm({
       bagWeightKg: it?.bagWeightKg ?? "",
       mode: it?.bagWeightKg ? "bag" : "kg",
     });
+  }
+  // Scan (§8.3): fill the first empty line; an unknown barcode offers to create
+  // a new item with the barcode pre-filled.
+  function onScan(code: string) {
+    const it = byBarcode.get(code);
+    if (!it) {
+      setScanMsg(
+        <>
+          No item for barcode {code}.{" "}
+          <a href={`/admin/items/new?barcode=${encodeURIComponent(code)}`} className="font-semibold underline">
+            Add as new item →
+          </a>
+        </>,
+      );
+      return;
+    }
+    setLines((prev) => {
+      const idx = prev.findIndex((l) => !l.itemId);
+      if (idx >= 0) return prev.map((l, i) => (i === idx ? lineFromItem(it) : l));
+      return [...prev, lineFromItem(it)];
+    });
+    setScanMsg(`Added ${it.name} — enter quantity & rate.`);
   }
 
   const lineTotals = lines.map((l) => {
@@ -83,6 +123,13 @@ export default function PurchaseForm({
       <input type="hidden" name="paymentType" value={paymentType} />
 
       <SupplierPicker suppliers={suppliers} />
+
+      {/* Barcode scan (§8.3) */}
+      <div>
+        <Label>Scan barcode</Label>
+        <BarcodeInput onScan={onScan} placeholder="Scan to add an item line…" />
+        {scanMsg && <p className="mt-1 text-xs text-brand-700 dark:text-brand-400">{scanMsg}</p>}
+      </div>
 
       {/* Line items */}
       <div className="space-y-3">

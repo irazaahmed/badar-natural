@@ -6,8 +6,9 @@ import { createSale } from "@/lib/actions/sales";
 import type { FormState } from "@/lib/actions/utils";
 import { FormError, Input, Label, SubmitButton, inputCls } from "@/components/ui";
 import CustomerPicker, { type PickerCustomer } from "@/components/customer-picker";
+import { BarcodeInput } from "@/components/barcode-input";
 import { formatMoney } from "@/lib/format";
-import { formatQty, RETAIL_PRESETS, parseQtyToGrams } from "@/lib/units";
+import { formatQty, formatKg, RETAIL_PRESETS, parseQtyToGrams } from "@/lib/units";
 
 export type RetailItemOption = {
   id: string;
@@ -16,6 +17,8 @@ export type RetailItemOption = {
   baseUnit: "GRAM" | "ML";
   currentStock: number;
   retailPricePerKg: string;
+  barcode: string | null;
+  defaultPackWeightGrams: number | null;
 };
 
 type CartLine = { itemId: string; name: string; grams: number; label: string; ratePerKg: number; lineTotal: number };
@@ -32,18 +35,47 @@ export default function RetailForm({
   const [paymentType, setPaymentType] = useState<"CASH" | "CREDIT">("CASH");
   const [amountPaid, setAmountPaid] = useState("0");
   const [override, setOverride] = useState(false);
+  const [confirmLimit, setConfirmLimit] = useState(false);
   const formRef = useRef<HTMLFormElement>(null);
 
   // Draft line being built
   const [itemId, setItemId] = useState("");
   const [freeKg, setFreeKg] = useState("");
   const [rate, setRate] = useState("");
+  const [scanMsg, setScanMsg] = useState<string | null>(null);
 
   const selected = useMemo(() => items.find((x) => x.id === itemId), [items, itemId]);
+  const byBarcode = useMemo(() => {
+    const m = new Map<string, RetailItemOption>();
+    for (const it of items) if (it.barcode) m.set(it.barcode, it);
+    return m;
+  }, [items]);
+
+  // Scan handler (§8.3): pre-packaged items drop straight into the cart at their
+  // pack size; loose items are pulled into the draft so weight can be entered.
+  function onScan(code: string) {
+    const it = byBarcode.get(code);
+    if (!it) {
+      setScanMsg(`Barcode ${code} not recognized — search manually below.`);
+      return;
+    }
+    const r = parseFloat(it.retailPricePerKg) || 0;
+    if (it.defaultPackWeightGrams && it.defaultPackWeightGrams > 0) {
+      const grams = it.defaultPackWeightGrams;
+      setCart((prev) => [
+        ...prev,
+        { itemId: it.id, name: it.name, grams, label: formatKg(grams / 1000, it.baseUnit), ratePerKg: r, lineTotal: (grams / 1000) * r },
+      ]);
+      setScanMsg(`Added ${it.name} (${formatKg(grams / 1000, it.baseUnit)}).`);
+    } else {
+      onSelectItem(it.id);
+      setScanMsg(`${it.name} — enter the weight.`);
+    }
+  }
 
   useEffect(() => {
-    if (override) formRef.current?.requestSubmit();
-  }, [override]);
+    if (override || confirmLimit) formRef.current?.requestSubmit();
+  }, [override, confirmLimit]);
 
   function onSelectItem(id: string) {
     setItemId(id);
@@ -83,6 +115,12 @@ export default function RetailForm({
     <div className="grid gap-6 lg:grid-cols-2">
       {/* Draft entry */}
       <div className="space-y-4">
+        <div>
+          <Label>Scan barcode</Label>
+          <BarcodeInput onScan={onScan} autoFocus placeholder="Scan item, or search below…" />
+          {scanMsg && <p className="mt-1 text-xs text-brand-700 dark:text-brand-400">{scanMsg}</p>}
+        </div>
+
         <div>
           <Label htmlFor="item">Item</Label>
           <select id="item" value={itemId} onChange={(e) => onSelectItem(e.target.value)} className={inputCls}>
@@ -142,6 +180,7 @@ export default function RetailForm({
         <input type="hidden" name="items" value={itemsJson} />
         <input type="hidden" name="paymentType" value={paymentType} />
         <input type="hidden" name="confirmOverStock" value={override ? "1" : ""} />
+        <input type="hidden" name="confirmCreditLimit" value={confirmLimit ? "1" : ""} />
 
         <div className="rounded-xl border border-slate-200 dark:border-slate-700">
           <div className="border-b border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 dark:border-slate-700 dark:text-slate-300">
@@ -212,6 +251,17 @@ export default function RetailForm({
             </p>
             <button type="button" onClick={() => setOverride(true)} className="mt-2 rounded-full bg-amber-600 px-4 py-1.5 text-xs font-semibold text-white hover:bg-amber-700">
               Sell anyway (oversell)
+            </button>
+          </div>
+        )}
+
+        {state?.creditLimit && !confirmLimit && (
+          <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300">
+            <p className="font-medium">
+              {state.creditLimit.customerName} would owe {formatMoney(state.creditLimit.afterSale)} after this sale, over their credit limit of {formatMoney(state.creditLimit.limit)}.
+            </p>
+            <button type="button" onClick={() => setConfirmLimit(true)} className="mt-2 rounded-full bg-amber-600 px-4 py-1.5 text-xs font-semibold text-white hover:bg-amber-700">
+              Sell on credit anyway
             </button>
           </div>
         )}

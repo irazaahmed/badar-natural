@@ -35,6 +35,7 @@ export default async function NewPurchasePage() {
             category: i.category,
             bagWeightKg: i.bagWeightKg ? i.bagWeightKg.toString() : null,
             lastPurchasePricePerKg: i.lastPurchasePricePerKg ? i.lastPurchasePricePerKg.toString() : null,
+            barcode: i.barcode,
           }))}
           suppliers={suppliers.map((s) => ({ id: s.id, name: s.name, phone: s.phone }))}
         />

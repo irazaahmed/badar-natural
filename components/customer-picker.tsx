@@ -16,9 +16,13 @@ export type PickerCustomer = { id: string; name: string; phone: string };
 export default function CustomerPicker({
   customers,
   label = "Customer (optional)",
+  onExistingChange,
 }: {
   customers: PickerCustomer[];
   label?: string;
+  /** Fires with the selected existing customer id ("" for walk-in). Lets a
+   *  parent form apply per-customer pricing (§7.2). */
+  onExistingChange?: (id: string) => void;
 }) {
   // Default to "new" when there are no saved customers yet.
   const [mode, setMode] = useState<"existing" | "new">(
@@ -35,7 +39,11 @@ export default function CustomerPicker({
             <button
               key={m}
               type="button"
-              onClick={() => setMode(m)}
+              onClick={() => {
+                setMode(m);
+                if (m === "new") onExistingChange?.("");
+                else onExistingChange?.(existingId);
+              }}
               className={`rounded-md px-3 py-1 text-xs font-semibold transition-colors ${
                 mode === m
                   ? "bg-brand-600 text-white"
@@ -53,7 +61,10 @@ export default function CustomerPicker({
           id="customerId"
           name="customerId"
           value={existingId}
-          onChange={(e) => setExistingId(e.target.value)}
+          onChange={(e) => {
+            setExistingId(e.target.value);
+            onExistingChange?.(e.target.value);
+          }}
           className={inputCls}
         >
           <option value="">— Walk-in (no customer) —</option>

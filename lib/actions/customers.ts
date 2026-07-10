@@ -5,12 +5,25 @@ import { redirect } from "next/navigation";
 import { Prisma, CustomerType } from "@prisma/client";
 import prisma from "@/lib/prisma";
 import { hashCustomerPassword } from "@/lib/customer-auth";
-import { requireAdmin, field, fieldOrNull, normalizePhone, type FormState } from "./utils";
+import { requireAdmin, field, fieldOrNull, moneyField, normalizePhone, type FormState } from "./utils";
 
 function parseType(formData: FormData): CustomerType {
   return field(formData, "type") === "RETAIL_REGULAR"
     ? CustomerType.RETAIL_REGULAR
     : CustomerType.WHOLESALE;
+}
+
+/**
+ * Parse the optional standing discount (%) and credit limit (Rs.) (§7.2).
+ * Empty fields → null (no discount / unlimited credit). Throws on invalid input.
+ */
+function parseTerms(formData: FormData): { discountPercent: Prisma.Decimal | null; creditLimit: Prisma.Decimal | null } {
+  const discountPercent = moneyField(formData, "discountPercent");
+  const creditLimit = moneyField(formData, "creditLimit");
+  if (discountPercent && (discountPercent.lt(0) || discountPercent.gt(100)))
+    throw new Error("Discount must be between 0 and 100%.");
+  if (creditLimit && creditLimit.lt(0)) throw new Error("Credit limit cannot be negative.");
+  return { discountPercent: discountPercent ?? null, creditLimit: creditLimit ?? null };
 }
 
 /**
@@ -45,21 +58,23 @@ export async function saveCustomer(_prev: FormState, formData: FormData): Promis
   if (!name) return { error: "Customer name is required." };
 
   let passwordHash: string | null | undefined;
+  let terms: { discountPercent: Prisma.Decimal | null; creditLimit: Prisma.Decimal | null };
   try {
     passwordHash = await resolvePortalPassword(formData, phone);
+    terms = parseTerms(formData);
   } catch (e) {
-    return { error: e instanceof Error ? e.message : "Invalid portal password." };
+    return { error: e instanceof Error ? e.message : "Invalid customer details." };
   }
   const pwData = passwordHash === undefined ? {} : { passwordHash };
 
   if (phone) {
     await prisma.customer.upsert({
       where: { phone },
-      update: { name, address, type, ...pwData },
-      create: { name, phone, address, type, ...pwData },
+      update: { name, address, type, ...terms, ...pwData },
+      create: { name, phone, address, type, ...terms, ...pwData },
     });
   } else {
-    await prisma.customer.create({ data: { name, address, type } });
+    await prisma.customer.create({ data: { name, address, type, ...terms } });
   }
 
   revalidatePath("/admin/customers");
@@ -79,10 +94,12 @@ export async function updateCustomer(
   if (!name) return { error: "Customer name is required." };
 
   let passwordHash: string | null | undefined;
+  let terms: { discountPercent: Prisma.Decimal | null; creditLimit: Prisma.Decimal | null };
   try {
     passwordHash = await resolvePortalPassword(formData, phone);
+    terms = parseTerms(formData);
   } catch (e) {
-    return { error: e instanceof Error ? e.message : "Invalid portal password." };
+    return { error: e instanceof Error ? e.message : "Invalid customer details." };
   }
 
   try {
@@ -93,6 +110,7 @@ export async function updateCustomer(
         phone: phone || null,
         address,
         type,
+        ...terms,
         ...(passwordHash === undefined ? {} : { passwordHash }),
       },
     });

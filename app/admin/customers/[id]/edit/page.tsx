@@ -28,6 +28,8 @@ export default async function EditCustomerPage({
             address: customer.address ?? "",
             type: customer.type,
             hasLogin: customer.passwordHash !== null,
+            discountPercent: customer.discountPercent ? customer.discountPercent.toString() : "",
+            creditLimit: customer.creditLimit ? customer.creditLimit.toString() : "",
           }}
           submitLabel="Save changes"
         />

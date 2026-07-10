@@ -78,6 +78,7 @@ export async function createSale(_prev: FormState, formData: FormData): Promise<
     field(formData, "paymentType") === "CREDIT" ? PaymentType.CREDIT : PaymentType.CASH;
   const method = parseMethod(formData);
   const confirmOverStock = field(formData, "confirmOverStock") === "1";
+  const confirmCreditLimit = field(formData, "confirmCreditLimit") === "1";
 
   let paidAmount: Prisma.Decimal;
   if (paymentType === PaymentType.CASH) {
@@ -108,15 +109,18 @@ export async function createSale(_prev: FormState, formData: FormData): Promise<
   let saleId: string;
   try {
     saleId = await prisma.$transaction(async (tx) => {
-      // Over-stock check across the whole sale (aggregate per item).
+      // Over-stock check across the whole sale (aggregate per item). While here,
+      // snapshot each item's current purchase cost for the profit report (§7.3).
       const wanted = new Map<string, Prisma.Decimal>();
       for (const p of prepared)
         wanted.set(p.itemId, (wanted.get(p.itemId) ?? new Prisma.Decimal(0)).add(p.quantityGrams));
+      const costByItem = new Map<string, Prisma.Decimal | null>();
       for (const [itemId, need] of wanted) {
         const item = await tx.item.findUniqueOrThrow({
           where: { id: itemId },
-          select: { name: true, currentStock: true, baseUnit: true },
+          select: { name: true, currentStock: true, baseUnit: true, lastPurchasePricePerKg: true },
         });
+        costByItem.set(itemId, item.lastPurchasePricePerKg ?? null);
         if (need.gt(item.currentStock) && !confirmOverStock) {
           throw new OverStockError(item.name, item.currentStock.div(KG).toString(), need.div(KG).toString());
         }
@@ -128,6 +132,26 @@ export async function createSale(_prev: FormState, formData: FormData): Promise<
         phone: field(formData, "customerPhone") || null,
         type: channel === SaleChannel.WHOLESALE ? CustomerType.WHOLESALE : CustomerType.RETAIL_REGULAR,
       });
+
+      // Credit-limit guard (§7.2): warn-with-override. Only a credit sale that
+      // leaves an outstanding balance can breach a limit. The owner may confirm.
+      if (paymentType === PaymentType.CREDIT && customerId && due.gt(0) && !confirmCreditLimit) {
+        const cust = await tx.customer.findUniqueOrThrow({
+          where: { id: customerId },
+          select: { name: true, creditLimit: true, totalReceivable: true },
+        });
+        if (cust.creditLimit != null) {
+          const afterSale = cust.totalReceivable.add(due);
+          if (afterSale.gt(cust.creditLimit)) {
+            throw new CreditLimitError(
+              cust.name,
+              cust.creditLimit.toString(),
+              cust.totalReceivable.toString(),
+              afterSale.toString(),
+            );
+          }
+        }
+      }
 
       const invoiceNumber = await nextInvoiceNumber(tx, channel === SaleChannel.WHOLESALE ? "WHS" : "RTL");
       const sale = await tx.sale.create({
@@ -148,6 +172,7 @@ export async function createSale(_prev: FormState, formData: FormData): Promise<
               quantityLabel: p.quantityLabel,
               ratePerKg: p.ratePerKg,
               lineTotal: p.lineTotal,
+              costPerKgAtSale: costByItem.get(p.itemId) ?? null,
             })),
           },
         },
@@ -196,6 +221,9 @@ export async function createSale(_prev: FormState, formData: FormData): Promise<
     if (err instanceof OverStockError) {
       return { overStock: { itemName: err.itemName, available: err.available, requested: err.requested } };
     }
+    if (err instanceof CreditLimitError) {
+      return { creditLimit: { customerName: err.customerName, limit: err.limit, current: err.current, afterSale: err.afterSale } };
+    }
     return { error: err instanceof Error ? err.message : "Could not record the sale." };
   }
 
@@ -216,6 +244,69 @@ class OverStockError extends Error {
   }
 }
 
+class CreditLimitError extends Error {
+  constructor(
+    public customerName: string,
+    public limit: string,
+    public current: string,
+    public afterSale: string,
+  ) {
+    super("Credit limit exceeded");
+  }
+}
+
+/**
+ * Soft-cancel a sale (§7.1). Never hard-deletes: the invoice number and line
+ * history stay intact. Reverses stock for every line and, for a credit sale
+ * that still carried receivable, appends a REFUND ledger entry that nets this
+ * sale's outstanding balance back to zero. Idempotent-guarded: a sale can only
+ * be cancelled once.
+ */
+export async function cancelSale(saleId: string, formData: FormData): Promise<void> {
+  await requireAdmin();
+  const reason = field(formData, "cancelReason") || null;
+
+  await prisma.$transaction(async (tx) => {
+    const sale = await tx.sale.findUniqueOrThrow({
+      where: { id: saleId },
+      include: { items: true },
+    });
+    if (sale.cancelledAt) throw new Error("This sale is already cancelled.");
+
+    // Reverse stock for every line.
+    for (const li of sale.items) {
+      await tx.item.update({
+        where: { id: li.itemId },
+        data: { currentStock: { increment: li.quantityGrams } },
+      });
+    }
+
+    // Reverse the customer's outstanding exposure from this sale, if any.
+    const outstanding = sale.totalAmount.minus(sale.paidAmount);
+    if (sale.paymentType === PaymentType.CREDIT && sale.customerId && outstanding.gt(0)) {
+      await appendCustomerLedger(tx, {
+        customerId: sale.customerId,
+        type: CustomerEntryType.REFUND,
+        amount: outstanding.negated(),
+        saleId: sale.id,
+        note: `Cancelled ${sale.invoiceNumber}${reason ? ` — ${reason}` : ""}`,
+      });
+    }
+
+    await tx.sale.update({
+      where: { id: saleId },
+      data: { cancelledAt: new Date(), cancelReason: reason },
+    });
+  });
+
+  revalidatePath("/admin/sales");
+  revalidatePath(`/admin/sales/${saleId}/invoice`);
+  revalidatePath("/admin/items");
+  revalidatePath("/admin/customers");
+  revalidatePath("/admin");
+  redirect(`/admin/sales/${saleId}/invoice`);
+}
+
 /** Record a payment against a credit sale (settles customer receivable). */
 export async function recordSalePayment(
   saleId: string,
@@ -231,8 +322,9 @@ export async function recordSalePayment(
     await prisma.$transaction(async (tx) => {
       const sale = await tx.sale.findUniqueOrThrow({
         where: { id: saleId },
-        select: { id: true, customerId: true, totalAmount: true, paidAmount: true, invoiceNumber: true },
+        select: { id: true, customerId: true, totalAmount: true, paidAmount: true, invoiceNumber: true, cancelledAt: true },
       });
+      if (sale.cancelledAt) throw new Error("This sale is cancelled — no payments can be recorded.");
       if (!sale.customerId) throw new Error("This sale has no customer to settle against.");
       const remaining = sale.totalAmount.minus(sale.paidAmount);
       if (amount.gt(remaining)) throw new Error(`Amount exceeds the pending Rs. ${remaining.toString()}.`);

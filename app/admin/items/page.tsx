@@ -11,6 +11,7 @@ import {
   EmptyState,
 } from "@/components/ui";
 import { ItemRowActions } from "./row-actions";
+import { ItemBarcodeSearch } from "./item-barcode-search";
 
 export const dynamic = "force-dynamic";
 
@@ -19,12 +20,20 @@ export default async function ItemsPage() {
     orderBy: [{ isActive: "desc" }, { category: "asc" }, { name: "asc" }],
   });
 
+  const barcodeMap: Record<string, string> = {};
+  for (const it of items) if (it.barcode) barcodeMap[it.barcode] = it.id;
+
   return (
     <div>
       <PageHeader
         title="Stock"
         description="One inventory shared by retail and wholesale. Stock moves only through purchases and sales."
-        action={<LinkButton href="/admin/items/new">+ New item</LinkButton>}
+        action={
+          <div className="flex flex-wrap items-center gap-3">
+            <ItemBarcodeSearch map={barcodeMap} />
+            <LinkButton href="/admin/items/new">+ New item</LinkButton>
+          </div>
+        }
       />
 
       {items.length === 0 ? (

@@ -32,6 +32,8 @@ export default async function RetailSalePage() {
             baseUnit: i.baseUnit === "ML" ? "ML" : "GRAM",
             currentStock: Number(i.currentStock),
             retailPricePerKg: i.retailPricePerKg.toString(),
+            barcode: i.barcode,
+            defaultPackWeightGrams: i.defaultPackWeightGrams,
           }))}
           customers={customers.map((c) => ({ id: c.id, name: c.name, phone: c.phone ?? "" }))}
         />

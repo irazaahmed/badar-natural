@@ -44,6 +44,16 @@ model Item {
   category String // Atta, Chawal, Ghee, Oil, Masala, Honey, …
   baseUnit BaseUnit @default(GRAM)
 
+  /// Barcode as read by a USB/Bluetooth HID scanner (they type the string +
+  /// Enter). Nullable — loose bulk items may never get one — and unique so a
+  /// scan resolves to exactly one item. See components/barcode-input.tsx.
+  barcode String? @unique
+
+  /// Fixed pack size for pre-packaged items (e.g. a 1 kg honey jar = 1000).
+  /// A scan on the sale screen auto-fills this quantity. Null for loose bulk
+  /// items (atta/rice) where weight is still decided at the counter.
+  defaultPackWeightGrams Int?
+
   /// Single source of truth for on-hand stock, in baseUnit (grams / ml).
   currentStock Decimal @default(0)
 
@@ -64,8 +74,9 @@ model Item {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  purchaseItems PurchaseItem[]
-  saleItems     SaleItem[]
+  purchaseItems  PurchaseItem[]
+  saleItems      SaleItem[]
+  customerRates  CustomerItemRate[]
 
   @@index([category])
 }
@@ -126,6 +137,13 @@ model Customer {
   /// (username = their phone) to view their own ledger + invoices, read-only.
   /// Provisioned by the owner from the customer edit screen; null = no access.
   passwordHash    String?
+  /// Standing discount applied to every wholesale sale line when no per-item
+  /// override rate exists (§7.2). Percent, e.g. 5 = 5%. Null = none.
+  discountPercent Decimal?
+  /// Max receivable this customer may carry. On a credit sale that would push
+  /// totalReceivable past this, the owner is WARNED and may override (§7.2).
+  /// Null = unlimited.
+  creditLimit     Decimal?
   /// Running balance owed BY this customer (cached; recomputed from the ledger).
   totalReceivable Decimal      @default(0)
   createdAt       DateTime     @default(now())
@@ -133,11 +151,30 @@ model Customer {
   sales         Sale[]
   ledgerEntries CustomerLedgerEntry[]
   payments      Payment[]
+  itemRates     CustomerItemRate[]
+}
+
+/// Per-customer negotiated rate for a specific item (§7.2). Checked FIRST when
+/// building a wholesale sale line, before Customer.discountPercent and before
+/// Item.wholesalePricePerKg.
+model CustomerItemRate {
+  id         String   @id @default(cuid())
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  itemId     String
+  item       Item     @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  ratePerKg  Decimal
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([customerId, itemId])
+  @@index([customerId])
 }
 
 enum CustomerEntryType {
   SALE // increases receivable (credit sale)
   PAYMENT // decreases receivable (customer paid us)
+  REFUND // decreases receivable (a credit sale was cancelled/refunded, §7.1)
 }
 
 model CustomerLedgerEntry {
@@ -221,6 +258,11 @@ model Sale {
   status        PaymentStatus @default(PAID)
   totalAmount   Decimal
   paidAmount    Decimal       @default(0)
+  /// Soft-cancel (§7.1): never hard-delete a Sale so the invoice number and
+  /// history stay intact. When set, stock was reversed and any customer-ledger
+  /// entry refunded. A cancelled sale is read-only and excluded from reports.
+  cancelledAt   DateTime?
+  cancelReason  String?
   createdAt     DateTime      @default(now())
 
   items    SaleItem[]
@@ -240,6 +282,10 @@ model SaleItem {
   quantityLabel String // human-readable original entry, e.g. "1 pao", "2.5 kg"
   ratePerKg     Decimal // rate actually charged (may be overridden per line)
   lineTotal     Decimal
+  /// Snapshot of Item.lastPurchasePricePerKg at the moment of sale, so the
+  /// profit report (§7.3) stays accurate even if the purchase price changes
+  /// later. Null when cost was unknown at sale time.
+  costPerKgAtSale Decimal?
 }
 
 /* ─────────────────────────────── Payment ───────────────────────────── */
@@ -275,4 +321,17 @@ model Payment {
   createdAt  DateTime         @default(now())
 
   @@index([direction, createdAt])
+}
+
+/* ─────────────────────────────── Settings ──────────────────────────── */
+
+/// App-wide settings singleton (always id = 1). Holds the owner-editable
+/// thank-you message printed on every invoice (§7.1) and the WhatsApp share
+/// pre-fill text (§7.4). The fixed Urdu Nastaleeq tagline (§8.1) is NOT here —
+/// it is a mandatory constant in lib/business.ts, not editable.
+model AppSettings {
+  id               Int      @id @default(1)
+  thankYouMessage  String   @default("Shukriya! Aap ke bharosay ka shukriya — Badar Natural Foods")
+  sharePrefillText String   @default("Assalam-o-Alaikum, aap ka invoice attached hai. Shukriya — Badar Natural Foods")
+  updatedAt        DateTime @updatedAt
 }

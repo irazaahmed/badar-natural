@@ -124,3 +124,18 @@ body {
 .font-display {
   font-family: var(--font-display);
 }
+
+/* True Nastaleeq face for the mandatory Urdu invoice tagline (§8.1). */
+.font-nastaliq {
+  font-family: var(--font-nastaliq), "Noto Nastaliq Urdu", serif;
+}
+
+/* Print: keep the espresso header band and boxed invoice cells in full color
+   (browsers strip backgrounds/borders by default when saving to PDF). */
+@media print {
+  .invoice-sheet,
+  .invoice-sheet * {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+}

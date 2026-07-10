@@ -6,6 +6,7 @@ import { createSale } from "@/lib/actions/sales";
 import type { FormState } from "@/lib/actions/utils";
 import { FormError, Input, Label, SubmitButton, inputCls, btnRowCls } from "@/components/ui";
 import CustomerPicker, { type PickerCustomer } from "@/components/customer-picker";
+import { BarcodeInput } from "@/components/barcode-input";
 import { formatMoney } from "@/lib/format";
 import { formatQty } from "@/lib/units";
 
@@ -17,41 +18,100 @@ export type SaleItemOption = {
   currentStock: number; // base units
   wholesalePricePerKg: string;
   bagWeightKg: string | null;
+  barcode: string | null;
 };
 
 type Line = { itemId: string; mode: "kg" | "bag"; quantity: string; bagWeightKg: string; ratePerKg: string };
 const emptyLine: Line = { itemId: "", mode: "kg", quantity: "", bagWeightKg: "", ratePerKg: "" };
 
+/** Per-customer pricing (§7.2): item-specific overrides + a standing discount. */
+export type CustomerTerms = { discountPercent: number | null; rates: Record<string, string> };
+
 export default function WholesaleForm({
   items,
   customers,
+  customerTerms = {},
 }: {
   items: SaleItemOption[];
   customers: PickerCustomer[];
+  customerTerms?: Record<string, CustomerTerms>;
 }) {
   const [state, formAction] = useActionState<FormState, FormData>(createSale, undefined);
   const [lines, setLines] = useState<Line[]>([{ ...emptyLine }]);
   const [paymentType, setPaymentType] = useState<"CASH" | "CREDIT">("CASH");
   const [amountPaid, setAmountPaid] = useState("0");
   const [override, setOverride] = useState(false);
+  const [confirmLimit, setConfirmLimit] = useState(false);
   const formRef = useRef<HTMLFormElement>(null);
 
-  // When the admin confirms an oversell, resubmit with confirmOverStock=1.
+  // When the admin confirms an oversell / credit-limit breach, resubmit with
+  // the matching confirm flag set.
   useEffect(() => {
-    if (override) formRef.current?.requestSubmit();
-  }, [override]);
+    if (override || confirmLimit) formRef.current?.requestSubmit();
+  }, [override, confirmLimit]);
+
+  const [scanMsg, setScanMsg] = useState<string | null>(null);
+  const [customerId, setCustomerId] = useState("");
+  const byBarcode = useMemo(() => {
+    const m = new Map<string, SaleItemOption>();
+    for (const it of items) if (it.barcode) m.set(it.barcode, it);
+    return m;
+  }, [items]);
+
+  // Resolve the rate to charge for an item, given the selected customer (§7.2):
+  // per-item override first, else the standing discount off the wholesale price,
+  // else the plain wholesale price. Owner can still edit the line afterwards.
+  function computeRate(itemId: string, custId: string): string {
+    const it = items.find((x) => x.id === itemId);
+    if (!it) return "";
+    const terms = custId ? customerTerms[custId] : undefined;
+    const override = terms?.rates[itemId];
+    if (override) return override;
+    const base = parseFloat(it.wholesalePricePerKg) || 0;
+    const disc = terms?.discountPercent ?? 0;
+    if (disc > 0 && base > 0) return String(Math.round(base * (1 - disc / 100) * 100) / 100);
+    return it.wholesalePricePerKg;
+  }
+  function onCustomerChange(id: string) {
+    setCustomerId(id);
+    // Re-price every filled line for the newly selected customer.
+    setLines((prev) => prev.map((l) => (l.itemId ? { ...l, ratePerKg: computeRate(l.itemId, id) } : l)));
+  }
 
   function updateLine(i: number, patch: Partial<Line>) {
     setLines((prev) => prev.map((l, idx) => (idx === i ? { ...l, ...patch } : l)));
+  }
+  function lineFromItem(it: SaleItemOption): Line {
+    return {
+      itemId: it.id,
+      mode: it.bagWeightKg ? "bag" : "kg",
+      quantity: "",
+      bagWeightKg: it.bagWeightKg ?? "",
+      ratePerKg: computeRate(it.id, customerId),
+    };
   }
   function onPickItem(i: number, itemId: string) {
     const it = items.find((x) => x.id === itemId);
     updateLine(i, {
       itemId,
-      ratePerKg: it?.wholesalePricePerKg ?? "",
+      ratePerKg: computeRate(itemId, customerId),
       bagWeightKg: it?.bagWeightKg ?? "",
       mode: it?.bagWeightKg ? "bag" : "kg",
     });
+  }
+  // Scan (§8.3): fill the first empty line, else append a new line for the item.
+  function onScan(code: string) {
+    const it = byBarcode.get(code);
+    if (!it) {
+      setScanMsg(`Barcode ${code} not recognized — pick the item manually.`);
+      return;
+    }
+    setLines((prev) => {
+      const idx = prev.findIndex((l) => !l.itemId);
+      if (idx >= 0) return prev.map((l, i) => (i === idx ? lineFromItem(it) : l));
+      return [...prev, lineFromItem(it)];
+    });
+    setScanMsg(`Added ${it.name} — enter quantity & rate.`);
   }
 
   const computed = lines.map((l) => {
@@ -83,6 +143,14 @@ export default function WholesaleForm({
       <input type="hidden" name="items" value={itemsJson} />
       <input type="hidden" name="paymentType" value={paymentType} />
       <input type="hidden" name="confirmOverStock" value={override ? "1" : ""} />
+      <input type="hidden" name="confirmCreditLimit" value={confirmLimit ? "1" : ""} />
+
+      {/* Barcode scan (§8.3) */}
+      <div>
+        <Label>Scan barcode</Label>
+        <BarcodeInput onScan={onScan} placeholder="Scan to add an item line…" />
+        {scanMsg && <p className="mt-1 text-xs text-brand-700 dark:text-brand-400">{scanMsg}</p>}
+      </div>
 
       {/* Line items */}
       <div className="space-y-3">
@@ -185,7 +253,7 @@ export default function WholesaleForm({
         </div>
       )}
 
-      <CustomerPicker customers={customers} label={paymentType === "CREDIT" ? "Customer (required for credit)" : "Customer (optional)"} />
+      <CustomerPicker customers={customers} label={paymentType === "CREDIT" ? "Customer (required for credit)" : "Customer (optional)"} onExistingChange={onCustomerChange} />
 
       {/* Totals */}
       <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm dark:border-slate-700 dark:bg-slate-800/50">
@@ -214,6 +282,17 @@ export default function WholesaleForm({
           </p>
           <button type="button" onClick={() => setOverride(true)} className="mt-2 rounded-full bg-amber-600 px-4 py-1.5 text-xs font-semibold text-white hover:bg-amber-700">
             Sell anyway (oversell)
+          </button>
+        </div>
+      )}
+
+      {state?.creditLimit && !confirmLimit && (
+        <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300">
+          <p className="font-medium">
+            {state.creditLimit.customerName} would owe {formatMoney(state.creditLimit.afterSale)} after this sale, over their credit limit of {formatMoney(state.creditLimit.limit)} (currently {formatMoney(state.creditLimit.current)}).
+          </p>
+          <button type="button" onClick={() => setConfirmLimit(true)} className="mt-2 rounded-full bg-amber-600 px-4 py-1.5 text-xs font-semibold text-white hover:bg-amber-700">
+            Sell on credit anyway
           </button>
         </div>
       )}

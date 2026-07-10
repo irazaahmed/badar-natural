@@ -13,6 +13,8 @@ export type FormState =
       ok?: boolean;
       /** Set when a sale is oversold and the form must confirm before proceeding. */
       overStock?: { itemName: string; available: string; requested: string };
+      /** Set when a credit sale would breach the customer's credit limit (§7.2). */
+      creditLimit?: { customerName: string; limit: string; current: string; afterSale: string };
     }
   | undefined;
 

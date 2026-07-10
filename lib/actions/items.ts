@@ -17,6 +17,8 @@ function parseItem(formData: FormData) {
   const wholesalePricePerKg = moneyField(formData, "wholesalePricePerKg");
   const lowStockKg = moneyField(formData, "lowStockThresholdKg");
   const bagWeightKg = moneyField(formData, "bagWeightKg");
+  const barcode = fieldOrNull(formData, "barcode");
+  const packKg = moneyField(formData, "defaultPackKg"); // pre-packaged size, kg/L
 
   if (!name) return { error: "Item name is required." as string };
   if (!category) return { error: "Category is required." };
@@ -26,6 +28,7 @@ function parseItem(formData: FormData) {
     return { error: "Enter a valid wholesale price (per kg)." };
   if (bagWeightKg && bagWeightKg.lte(0)) return { error: "Bag weight must be positive." };
   if (lowStockKg && lowStockKg.lt(0)) return { error: "Low-stock threshold cannot be negative." };
+  if (packKg && packKg.lte(0)) return { error: "Default pack size must be positive." };
 
   return {
     name,
@@ -35,7 +38,19 @@ function parseItem(formData: FormData) {
     wholesalePricePerKg,
     lowStockThreshold: (lowStockKg ?? new Prisma.Decimal(0)).mul(KG),
     bagWeightKg: bagWeightKg ?? null,
+    barcode,
+    // stored in base units (grams / ml) as an integer for scan auto-fill (§8.3)
+    defaultPackWeightGrams: packKg ? Math.round(packKg.mul(KG).toNumber()) : null,
   };
+}
+
+/** Prisma unique-constraint (P2002) → friendly message for the barcode field. */
+function isBarcodeConflict(e: unknown): boolean {
+  return (
+    e instanceof Prisma.PrismaClientKnownRequestError &&
+    e.code === "P2002" &&
+    (e.meta?.target as string[] | undefined)?.includes("barcode") === true
+  );
 }
 
 export async function createItem(_prev: FormState, formData: FormData): Promise<FormState> {
@@ -46,18 +61,25 @@ export async function createItem(_prev: FormState, formData: FormData): Promise<
   const openingKg = moneyField(formData, "openingStockKg");
   const currentStock = (openingKg ?? new Prisma.Decimal(0)).mul(KG);
 
-  await prisma.item.create({
-    data: {
-      name: parsed.name,
-      category: parsed.category,
-      baseUnit: parsed.baseUnit,
-      retailPricePerKg: parsed.retailPricePerKg,
-      wholesalePricePerKg: parsed.wholesalePricePerKg,
-      lowStockThreshold: parsed.lowStockThreshold,
-      bagWeightKg: parsed.bagWeightKg,
-      currentStock,
-    },
-  });
+  try {
+    await prisma.item.create({
+      data: {
+        name: parsed.name,
+        category: parsed.category,
+        baseUnit: parsed.baseUnit,
+        retailPricePerKg: parsed.retailPricePerKg,
+        wholesalePricePerKg: parsed.wholesalePricePerKg,
+        lowStockThreshold: parsed.lowStockThreshold,
+        bagWeightKg: parsed.bagWeightKg,
+        barcode: parsed.barcode,
+        defaultPackWeightGrams: parsed.defaultPackWeightGrams,
+        currentStock,
+      },
+    });
+  } catch (e) {
+    if (isBarcodeConflict(e)) return { error: "Another item already uses that barcode." };
+    throw e;
+  }
 
   revalidatePath("/admin/items");
   redirect("/admin/items");
@@ -82,6 +104,8 @@ export async function updateItem(
     wholesalePricePerKg: parsed.wholesalePricePerKg,
     lowStockThreshold: parsed.lowStockThreshold,
     bagWeightKg: parsed.bagWeightKg,
+    barcode: parsed.barcode,
+    defaultPackWeightGrams: parsed.defaultPackWeightGrams,
   };
 
   const correctionKg = moneyField(formData, "stockCorrectionKg");
@@ -90,7 +114,12 @@ export async function updateItem(
     data.currentStock = correctionKg.mul(KG);
   }
 
-  await prisma.item.update({ where: { id }, data });
+  try {
+    await prisma.item.update({ where: { id }, data });
+  } catch (e) {
+    if (isBarcodeConflict(e)) return { error: "Another item already uses that barcode." };
+    throw e;
+  }
 
   revalidatePath("/admin/items");
   redirect("/admin/items");

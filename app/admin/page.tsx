@@ -47,12 +47,12 @@ export default async function DashboardPage() {
   const [retailToday, wholesaleToday, payableAgg, receivableAgg, overdueSuppliers, overdueCustomers, lowStock] =
     await Promise.all([
       prisma.sale.aggregate({
-        where: { channel: "RETAIL", createdAt: { gte: todayStart } },
+        where: { channel: "RETAIL", createdAt: { gte: todayStart }, cancelledAt: null },
         _sum: { totalAmount: true },
         _count: { _all: true },
       }),
       prisma.sale.aggregate({
-        where: { channel: "WHOLESALE", createdAt: { gte: todayStart } },
+        where: { channel: "WHOLESALE", createdAt: { gte: todayStart }, cancelledAt: null },
         _sum: { totalAmount: true },
         _count: { _all: true },
       }),
@@ -65,7 +65,7 @@ export default async function DashboardPage() {
       }),
       prisma.sale.groupBy({
         by: ["customerId"],
-        where: { status: { not: "PAID" }, dueDate: { lt: now }, customerId: { not: null } },
+        where: { status: { not: "PAID" }, dueDate: { lt: now }, customerId: { not: null }, cancelledAt: null },
         _count: { _all: true },
       }),
       prisma.$queryRaw<Array<{ id: string; name: string; currentStock: string; lowStockThreshold: string; baseUnit: string }>>`

@@ -13,6 +13,7 @@ const ICONS: Record<string, React.ReactNode> = {
   suppliers: <path d="M3 13h11V6H3zM14 9h4l3 3v1h-7M6.5 20a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3ZM17.5 20a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Z" />,
   customers: <path d="M16 19v-1.5a3.5 3.5 0 0 0-3.5-3.5h-5A3.5 3.5 0 0 0 4 17.5V19M10 11a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7ZM20 19v-1.5a3.5 3.5 0 0 0-2.5-3.35M14.5 4.15A3.5 3.5 0 0 1 14.5 11" />,
   sales: <path d="M3 7h18v10H3zM3 11h18M7 15h3" />,
+  reports: <path d="M4 4v16h16M8 16V10M12 16V6M16 16v-4M20 16v-8" />,
   settings: <path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z" />,
 };
 
@@ -25,6 +26,7 @@ const LINKS = [
   { href: "/admin/suppliers", label: "Suppliers", icon: "suppliers" },
   { href: "/admin/customers", label: "Customers", icon: "customers" },
   { href: "/admin/sales", label: "Sales History", icon: "sales" },
+  { href: "/admin/reports", label: "Reports", icon: "reports" },
   { href: "/admin/settings", label: "Settings", icon: "settings" },
 ];
 
