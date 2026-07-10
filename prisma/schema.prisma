@@ -1,0 +1,278 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+/// Single-admin auth. Not business data — this is the login credential store.
+/// The first row is bootstrapped from env (ADMIN_EMAIL / ADMIN_PASSWORD_HASH
+/// or ADMIN_PASSWORD) on the first successful login; after that the admin can
+/// change the password from the settings screen and env is ignored.
+///
+/// A `role` column is kept ready so a `staff` role can be added later without
+/// a schema migration; only ADMIN is used today.
+model AdminUser {
+  id           String    @id @default(cuid())
+  email        String    @unique
+  passwordHash String
+  role         AdminRole @default(ADMIN)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+}
+
+enum AdminRole {
+  ADMIN
+  STAFF
+}
+
+/// The atomic unit an item's stock is tracked in. Everything (retail pao/kilo
+/// and wholesale kg/bags) is normalized to this so there is ONE source of
+/// truth for stock. See lib/units.ts for all conversions.
+enum BaseUnit {
+  GRAM // solids: atta, chawal, masala, honey…
+  ML // liquids: oil, ghee (sold by weight in practice, but ml supported)
+}
+
+/// One item, shared by BOTH the retail and wholesale channels. Stock lives in
+/// `currentStock` (baseUnit) — never in mixed units.
+model Item {
+  id       String   @id @default(cuid())
+  name     String
+  category String // Atta, Chawal, Ghee, Oil, Masala, Honey, …
+  baseUnit BaseUnit @default(GRAM)
+
+  /// Single source of truth for on-hand stock, in baseUnit (grams / ml).
+  currentStock Decimal @default(0)
+
+  /// Selling prices are quoted per KG / per LITRE (1000 baseUnits) regardless
+  /// of baseUnit, matching how the shop talks about price.
+  retailPricePerKg       Decimal
+  wholesalePricePerKg    Decimal
+  lastPurchasePricePerKg Decimal? // most recent supplier rate, for margin visibility
+
+  /// Default bag → kg conversion for wholesale purchases (e.g. atta bag = 20).
+  /// Nullable; a purchase line can still override the bag weight it used.
+  bagWeightKg Decimal?
+
+  /// Dashboard low-stock alert threshold, stored in baseUnit (grams / ml).
+  lowStockThreshold Decimal @default(0)
+
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  purchaseItems PurchaseItem[]
+  saleItems     SaleItem[]
+
+  @@index([category])
+}
+
+/* ───────────────────────────── Suppliers ───────────────────────────── */
+
+/// A wholesaler Badar buys bulk stock from.
+model Supplier {
+  id           String   @id @default(cuid())
+  name         String
+  phone        String?
+  address      String?
+  /// Running balance owed TO this supplier (cached; recomputed from the ledger).
+  totalPayable Decimal  @default(0)
+  createdAt    DateTime @default(now())
+
+  purchases     Purchase[]
+  ledgerEntries SupplierLedgerEntry[]
+  payments      Payment[]
+}
+
+enum SupplierEntryType {
+  PURCHASE // increases payable (credit purchase)
+  PAYMENT // decreases payable (we paid the supplier)
+}
+
+model SupplierLedgerEntry {
+  id           String            @id @default(cuid())
+  supplierId   String
+  supplier     Supplier          @relation(fields: [supplierId], references: [id])
+  purchaseId   String? // originating purchase, if any
+  paymentId    String? // originating payment, if any
+  type         SupplierEntryType
+  amount       Decimal // signed by convention: +purchase, -payment
+  balanceAfter Decimal // payable snapshot after this entry
+  note         String?
+  createdAt    DateTime          @default(now())
+
+  @@index([supplierId, createdAt])
+}
+
+/* ───────────────────────────── Customers ───────────────────────────── */
+
+enum CustomerType {
+  WHOLESALE
+  RETAIL_REGULAR // optional named tracking for repeat walk-ins
+}
+
+/// A wholesale buyer (or optionally a tracked retail regular). Anonymous retail
+/// walk-ins do NOT need a Customer row.
+model Customer {
+  id              String       @id @default(cuid())
+  name            String
+  phone           String?      @unique
+  address         String?
+  type            CustomerType @default(WHOLESALE)
+  /// Optional self-service portal login. When set, the customer can sign in
+  /// (username = their phone) to view their own ledger + invoices, read-only.
+  /// Provisioned by the owner from the customer edit screen; null = no access.
+  passwordHash    String?
+  /// Running balance owed BY this customer (cached; recomputed from the ledger).
+  totalReceivable Decimal      @default(0)
+  createdAt       DateTime     @default(now())
+
+  sales         Sale[]
+  ledgerEntries CustomerLedgerEntry[]
+  payments      Payment[]
+}
+
+enum CustomerEntryType {
+  SALE // increases receivable (credit sale)
+  PAYMENT // decreases receivable (customer paid us)
+}
+
+model CustomerLedgerEntry {
+  id           String            @id @default(cuid())
+  customerId   String
+  customer     Customer          @relation(fields: [customerId], references: [id])
+  saleId       String?
+  paymentId    String?
+  type         CustomerEntryType
+  amount       Decimal
+  balanceAfter Decimal
+  note         String?
+  createdAt    DateTime          @default(now())
+
+  @@index([customerId, createdAt])
+}
+
+/* ───────────────────────────── Payments ────────────────────────────── */
+
+enum PaymentType {
+  CASH
+  CREDIT
+}
+
+enum PaymentStatus {
+  UNPAID
+  PARTIAL
+  PAID
+}
+
+/* ───────────────────────────── Purchases ───────────────────────────── */
+
+/// Badar buying bulk stock from a supplier.
+model Purchase {
+  id            String        @id @default(cuid())
+  supplierId    String
+  supplier      Supplier      @relation(fields: [supplierId], references: [id])
+  invoiceNumber String        @unique // PUR-0001
+  paymentType   PaymentType   @default(CASH)
+  creditDays    Int? // only when credit
+  dueDate       DateTime? // createdAt + creditDays
+  status        PaymentStatus @default(PAID)
+  totalAmount   Decimal
+  paidAmount    Decimal       @default(0)
+  createdAt     DateTime      @default(now())
+
+  items    PurchaseItem[]
+  payments Payment[]
+
+  @@index([supplierId])
+}
+
+model PurchaseItem {
+  id         String   @id @default(cuid())
+  purchaseId String
+  purchase   Purchase @relation(fields: [purchaseId], references: [id], onDelete: Cascade)
+  itemId     String
+  item       Item     @relation(fields: [itemId], references: [id])
+  quantityKg Decimal // normalized to kg (bags × bagWeight already applied)
+  ratePerKg  Decimal
+  lineTotal  Decimal
+}
+
+/* ─────────────────────────────── Sales ─────────────────────────────── */
+
+enum SaleChannel {
+  RETAIL
+  WHOLESALE
+}
+
+/// Both retail and wholesale sales flow through this table, split by `channel`.
+model Sale {
+  id            String        @id @default(cuid())
+  channel       SaleChannel
+  customerId    String? // nullable for anonymous retail walk-in
+  customer      Customer?     @relation(fields: [customerId], references: [id])
+  invoiceNumber String        @unique // RTL-0001 / WHS-0001
+  paymentType   PaymentType   @default(CASH)
+  creditDays    Int?
+  dueDate       DateTime?
+  status        PaymentStatus @default(PAID)
+  totalAmount   Decimal
+  paidAmount    Decimal       @default(0)
+  createdAt     DateTime      @default(now())
+
+  items    SaleItem[]
+  payments Payment[]
+
+  @@index([channel, createdAt])
+  @@index([customerId])
+}
+
+model SaleItem {
+  id            String  @id @default(cuid())
+  saleId        String
+  sale          Sale    @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  itemId        String
+  item          Item    @relation(fields: [itemId], references: [id])
+  quantityGrams Decimal // normalized (pao/adha-kilo/kilo/kg → baseUnit)
+  quantityLabel String // human-readable original entry, e.g. "1 pao", "2.5 kg"
+  ratePerKg     Decimal // rate actually charged (may be overridden per line)
+  lineTotal     Decimal
+}
+
+/* ─────────────────────────────── Payment ───────────────────────────── */
+
+enum PaymentDirection {
+  PAYABLE // we pay a supplier
+  RECEIVABLE // a customer pays us
+}
+
+enum PaymentMethod {
+  CASH
+  BANK_TRANSFER
+  EASYPAISA
+  JAZZCASH
+}
+
+/// Settling credit in either direction. Updates the linked Purchase/Sale
+/// status and appends the matching supplier/customer ledger entry.
+model Payment {
+  id         String           @id @default(cuid())
+  direction  PaymentDirection
+  supplierId String?
+  supplier   Supplier?        @relation(fields: [supplierId], references: [id])
+  customerId String?
+  customer   Customer?        @relation(fields: [customerId], references: [id])
+  purchaseId String?
+  purchase   Purchase?        @relation(fields: [purchaseId], references: [id])
+  saleId     String?
+  sale       Sale?            @relation(fields: [saleId], references: [id])
+  amount     Decimal
+  method     PaymentMethod    @default(CASH)
+  note       String?
+  createdAt  DateTime         @default(now())
+
+  @@index([direction, createdAt])
+}

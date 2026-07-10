@@ -1,0 +1,126 @@
+@import "tailwindcss";
+
+/* Class-based dark mode (next-themes toggles a `.dark` class on <html>)
+   instead of Tailwind v4's default prefers-color-scheme strategy. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/*
+ * ─────────────────────────────────────────────────────────────────────────
+ * Badar Natural Foods — brand design tokens (single source of truth).
+ * Palette is locked (CLAUDE.md §1.1), derived from badarnatural.com:
+ *   - Background   warm cream / sandy beige   #F0E4C8 range (never pure white)
+ *   - Dark surface deep espresso brown        #2B1A10 – #3A2418 (header/sidebar)
+ *   - Accent / CTA mustard-gold pill buttons   #E8D48A – #F0DFA0, dark text
+ *   - Text         dark brown                  #3D2817 (not pure black)
+ *
+ * We warm the WHOLE app by redefining Tailwind's neutral (`slate`), dark
+ * surface (`navy`) and accent (`brand`) scales here — components keep using
+ * bg-slate-*, bg-navy-900, bg-brand-600 etc., but they now read warm.
+ * Semantic colors (red/amber/emerald) are left standard for alert states.
+ * NEVER hardcode hex in components — reference the aliases below.
+ * ─────────────────────────────────────────────────────────────────────────
+ */
+@theme {
+  /* Primary accent — mustard-gold. 300 is the signature pill fill; 600/700 are
+     darkened for text/links so they clear contrast on the cream background. */
+  --color-brand-50: #fbf6e6;
+  --color-brand-100: #f6ecc4;
+  --color-brand-200: #f0dfa0;
+  --color-brand-300: #e8d48a;
+  --color-brand-400: #dcc066;
+  --color-brand-500: #c9a94a;
+  --color-brand-600: #b08d2e;
+  --color-brand-700: #8a6d22;
+  --color-brand-800: #6b531a;
+
+  /* Secondary accent — deeper gold, kept for price/margin emphasis. */
+  --color-gold-300: #e0c579;
+  --color-gold-400: #cda94f;
+  --color-gold-500: #b08d2e;
+  --color-gold-600: #8a6d22;
+
+  /* Dark brand surfaces — espresso brown (header, sidebar, footer). */
+  --color-navy-700: #4a331f;
+  --color-navy-800: #3a2418;
+  --color-navy-900: #2b1a10;
+  --color-navy-950: #1f130a;
+
+  /* Neutrals — warm taupe/brown instead of cool slate. Every bg-slate-*,
+     border-slate-*, text-slate-* across the app inherits this warmth. */
+  --color-slate-50: #f7f0dd;
+  --color-slate-100: #efe6cf;
+  --color-slate-200: #e3d6b8;
+  --color-slate-300: #d3c29b;
+  --color-slate-400: #b0a081;
+  --color-slate-500: #857758;
+  --color-slate-600: #665a41;
+  --color-slate-700: #4a3f2c;
+  --color-slate-800: #33291b;
+  --color-slate-900: #241b10;
+  --color-slate-950: #1a130a;
+
+  /* Warm near-white so bg-white surfaces read cream, not clinical white. */
+  --color-white: #fffdf6;
+
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+
+  /* Serif display face for page titles / logo lockup (brand continuity). */
+  --font-display: Georgia, "Times New Roman", serif;
+
+  /* WhatsApp brand green (single, unambiguous CTA color). */
+  --color-whatsapp: #25d366;
+  --color-whatsapp-dark: #1da851;
+
+  /* Landing hero + reveal animations (CSS only, gated behind motion-safe). */
+  --animate-fade-in-up: fade-in-up 0.6s ease-out both;
+  --animate-float-slow: float-slow 6s ease-in-out infinite;
+
+  @keyframes fade-in-up {
+    from {
+      opacity: 0;
+      transform: translateY(16px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  @keyframes float-slow {
+    0%,
+    100% {
+      transform: translateY(0);
+    }
+    50% {
+      transform: translateY(-10px);
+    }
+  }
+}
+
+/* App chrome background/foreground — warm cream by default, espresso in dark. */
+:root {
+  --background: #f0e4c8;
+  --foreground: #3d2817;
+}
+
+.dark {
+  --background: #1f130a;
+  --foreground: #f0e4c8;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
+}
+
+/* Brand display utility for page titles / wordmark. */
+.font-display {
+  font-family: var(--font-display);
+}
