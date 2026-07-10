@@ -53,7 +53,7 @@ export default function InvoiceSheet({
   return (
     <Card className="invoice-sheet overflow-hidden p-0 print:border-0 print:shadow-none">
       {/* Header — espresso band with logo + bilingual tagline */}
-      <div className="bg-navy-900 px-8 py-6 text-white print:bg-navy-900">
+      <div className="bg-navy-900 px-5 py-6 text-white sm:px-8 print:bg-navy-900">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="flex items-start gap-4">
             <Logo size={64} priority className="ring-brand-300/50 print:shadow-none" />
@@ -73,7 +73,7 @@ export default function InvoiceSheet({
         </div>
       </div>
 
-      <div className="px-8 py-6 text-slate-800 dark:text-slate-200">
+      <div className="px-5 py-6 text-slate-800 sm:px-8 dark:text-slate-200">
         {cancelled && (
           <div className="mb-4 rounded-lg border border-red-300 bg-red-50 px-4 py-2 text-center text-sm font-semibold text-red-700 dark:border-red-500/40 dark:bg-red-500/10 dark:text-red-400">
             CANCELLED — منسوخ {sale.cancelledAt ? `(${formatDate(sale.cancelledAt)})` : ""}
@@ -94,8 +94,10 @@ export default function InvoiceSheet({
           </div>
         </div>
 
-        {/* Lines — boxed cells (§8.2) */}
-        <table className="mt-4 w-full border-collapse text-sm">
+        {/* Lines — boxed cells (§8.2). Scrolls inside its own box on very narrow
+            screens so the page body never scrolls sideways. */}
+        <div className="mt-4 -mx-1 overflow-x-auto px-1 print:overflow-visible">
+        <table className="w-full border-collapse text-sm">
           <thead>
             <tr className="bg-slate-100/70 text-left text-xs uppercase tracking-wide text-slate-600 dark:bg-slate-800/40 dark:text-slate-300">
               <th className={cell}>Item / تفصیل</th>
@@ -118,6 +120,7 @@ export default function InvoiceSheet({
             ))}
           </tbody>
         </table>
+        </div>
 
         {/* Totals */}
         <div className="mt-4 ml-auto max-w-xs space-y-1.5 text-sm">
