@@ -224,7 +224,7 @@ export async function recordPurchasePayment(
         paymentId: payment.id,
         note: `Payment for ${purchase.invoiceNumber}`,
       });
-    });
+    }, { timeout: 20000, maxWait: 15000 });
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not record the payment." };
   }

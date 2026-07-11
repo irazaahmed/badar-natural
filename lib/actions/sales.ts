@@ -297,7 +297,7 @@ export async function cancelSale(saleId: string, formData: FormData): Promise<vo
       where: { id: saleId },
       data: { cancelledAt: new Date(), cancelReason: reason },
     });
-  });
+  }, { timeout: 20000, maxWait: 15000 });
 
   revalidatePath("/admin/sales");
   revalidatePath(`/admin/sales/${saleId}/invoice`);
@@ -351,7 +351,7 @@ export async function recordSalePayment(
         paymentId: payment.id,
         note: `Payment for ${sale.invoiceNumber}`,
       });
-    });
+    }, { timeout: 20000, maxWait: 15000 });
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not record the payment." };
   }
